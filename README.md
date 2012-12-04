@@ -1,7 +1,7 @@
 (For PayU Ukraine and Russian ONLY)
 -------
 
-Модуль для Shop-Script Premium 1.24 
+Модуль для ShopCMS 
 ==========
 
 
