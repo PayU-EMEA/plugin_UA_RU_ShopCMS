@@ -15,7 +15,7 @@ class CPayU extends PaymentModule {
 
         #var $type = PAYMTD_TYPE_ONLINE;
         var $language = 'rus';
-        #var $default_logo = '/data/images/loaderpayu.gif';
+        var $default_logo = '/data/images/loaderpayu.gif';
         var $prUrl = "https://secure.payu.ua/order/lu.php";#"; 
         
 
@@ -108,13 +108,14 @@ class CPayU extends PaymentModule {
         function payment_process( $order ){
         
         $cart = cartGetCartContent();
+        
+        $total = 0;
             foreach ( $cart['cart_content'] as $item )
             {
-                
-
                     $price = PaymentModule::_convertCurrency( $item['costUC'], 0, $this->_getSettingValue('CONF_PAYU_CURRENCY'));
                     if ($price == 0) $price = $item['costUC']; 
-                    $d['ORDER_PNAME'][] = CPayU::_DEC( $item['name'] ); # Array with data of goods
+                    $total += $price * $item['quantity'];
+                    $d['ORDER_PNAME'][] = CPayU::_DEC($item['name']); # Array with data of goods
                     $d['ORDER_QTY'][] = $item['quantity']; # Array with data of counts of each goods 
                     $d['ORDER_PRICE'][] = $price; # round( $price, 2 ); # Array with prices of goods
                     $d['ORDER_VAT'][] = 0; #$data['VAT'];# Array with VAT of each goods  => from settings
@@ -136,7 +137,8 @@ class CPayU extends PaymentModule {
                     'ORDER_QTY' => $d['ORDER_QTY'], # Array with data of counts of each goods 
                     'ORDER_VAT' => $d['ORDER_VAT'], # Array with VAT of each goods
                     'ORDER_SHIPPING' => $order["shipping_cost"], # Shipping cost
-                    'PRICES_CURRENCY' => $this->_getSettingValue('CONF_PAYU_CURRENCY')  # Currency
+                    'PRICES_CURRENCY' => $this->_getSettingValue('CONF_PAYU_CURRENCY'),  # Currency
+                    'total' => $total
                   );
 
 
@@ -149,27 +151,50 @@ class CPayU extends PaymentModule {
         function after_processing_html( $_OrderID )
         {   
             $data = @json_decode( base64_decode($_COOKIE['payuform']), true );
+            
+           
 
             if ( !$data ) return false;
 
+            foreach ($data['ORDER_PNAME'] as $k => $v)
+            {
+                $data['ORDER_PNAME'][$k] = CPayU::_ENC($v);
+            }
+
+
+            $button = "<div style='background-color: #000000; bottom: 0; left: 0; opacity: 0.4; position: fixed; right: 0; top: 0; z-index: 1000; '></div>".
+                        "<div style='position:absolute; top:50%; left:50%; margin:-40px 0px 0px -60px; z-index:1002;'>".
+                "<div><img src='/data/images/loaderpayu.gif' width='120px' style='margin:0px 5px;'></div>".
+                "</div>".
+                    "<script>
+                    setTimeout( subform, 500 );
+                    function subform(){ document.getElementById('PayUForm').submit(); }
+                    </script>";
+
             $data['ORDER_REF'] = $_SERVER['HTTP_HOST'].'_'.$_OrderID.'_'.md5( time() );
 
-            $payu  = new PayUCLS( $this->_getSettingValue('CONF_PAYU_MERCHANT'), $this->_getSettingValue('CONF_PAYU_SECRET_KEY') );
+            $option  = array(   'merchant' => $this->_getSettingValue('CONF_PAYU_MERCHANT'), 
+                                'secretkey' => $this->_getSettingValue('CONF_PAYU_SECRET_KEY'), 
+                                'debug' => $this->_getSettingValue('CONF_PAYU_DEBUG_MODE'), 
+                                'button' => $button );
 
-            $payu->update( $data )->debug( $this->_getSettingValue('CONF_PAYU_DEBUG_MODE') );
+            $order = ordGetOrder( $_OrderID );
+
+            $data['DISCOUNT'] = round( ( (double)$order["order_discount"]/100 ) * $data['total'], 2); #$order['order_discount'];
+
+            unset($data['total']);
 
             $result_url = $this->_getSettingValue('CONF_PAYU_BACK_REF');
-            if ($result_url !== "NO") $payu->data['BACK_REF'] = ($result_url !== "") ? $result_url : htmlentities($this->getTransactionResultURL('success'),ENT_QUOTES,'utf-8');
+            if ($result_url !== "NO") $data['BACK_REF'] = ($result_url !== "") ? $result_url : htmlentities($this->getTransactionResultURL('success'),ENT_QUOTES,'utf-8');
 
-            $form = $payu->getForm();
-
+            $pay = PayUCLS::getInst()->setOptions( $option )->setData( $data )->LU();
 
             $statusID = "3";
             
-            $order = ordGetOrder( $_OrderID );
+           
             ostSetOrderStatusToOrder( $_OrderID, $statusID, CPayU::_ENC("Оплата через PayU"), 0, true);
 
-            return $form ;
+            return $pay;
         }
 
     public static function _getDebugMode()
